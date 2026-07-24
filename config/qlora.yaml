@@ -1,0 +1,39 @@
+# QLoRA SFT config — tuned for a single 8 GB GPU (RTX 4060).
+# Swap `model` to a smaller one (see fallbacks) if you hit CUDA OOM.
+
+model: Qwen/Qwen2.5-7B-Instruct        # fallback: Qwen/Qwen2.5-3B-Instruct, Qwen/Qwen2.5-1.5B-Instruct
+dataset: Salesforce/xlam-function-calling-60k   # gated: accept terms on HF once, then `huggingface-cli login`
+                                                # open fallback: glaiveai/glaive-function-calling-v2
+max_samples: 8000            # keep the run short; raise once it trains cleanly
+eval_samples: 300
+max_seq_len: 1024
+seed: 42
+
+# LoRA
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+# Qwen2 attention + MLP projections
+lora_targets: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+# QLoRA quantization (4-bit nf4, double quant) — this is what makes 7B fit in 8 GB
+load_in_4bit: true
+bnb_4bit_quant_type: nf4
+bnb_4bit_compute_dtype: bfloat16
+bnb_4bit_use_double_quant: true
+
+# Training
+epochs: 1
+per_device_batch_size: 1
+grad_accum: 16               # effective batch = 16
+learning_rate: 2.0e-4
+warmup_ratio: 0.03
+lr_scheduler: cosine
+weight_decay: 0.0
+gradient_checkpointing: true
+bf16: true
+packing: true
+logging_steps: 10
+save_steps: 200
+
+output_dir: outputs/qwen2.5-7b-fc-qlora
