@@ -5,7 +5,7 @@
 4-bit nf4 base (bitsandbytes) + LoRA adapters (peft) + TRL SFTTrainer. Only the
 adapters train; the frozen 4-bit base is what lets a 7B model fit in 8 GB.
 """
-import argparse, yaml, torch
+import argparse, inspect, yaml, torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, prepare_model_for_kbit_training
@@ -63,7 +63,7 @@ def main():
 
     ds = load_dataset("json", data_files=c.train_file, split="train")
 
-    sft = SFTConfig(
+    sft_kwargs = dict(
         output_dir=cfg["output_dir"],
         num_train_epochs=cfg["epochs"],
         per_device_train_batch_size=cfg["per_device_batch_size"],
@@ -78,12 +78,20 @@ def main():
         logging_steps=cfg["logging_steps"],
         save_steps=cfg["save_steps"],
         save_total_limit=2,
-        max_seq_length=cfg["max_seq_len"],
         packing=cfg.get("packing", True),
         seed=cfg["seed"],
         report_to="none",
         optim="paged_adamw_8bit",   # paged 8-bit optimizer — another 8 GB saver
+        # TRL renamed max_seq_length -> max_length (>=0.20); pass both names and
+        # let the signature filter below keep whichever this version accepts.
+        max_length=cfg["max_seq_len"],
+        max_seq_length=cfg["max_seq_len"],
     )
+    accepted = set(inspect.signature(SFTConfig.__init__).parameters)
+    dropped = sorted(k for k in sft_kwargs if k not in accepted)
+    if dropped:
+        print(f"· SFTConfig ignores (not in this TRL): {', '.join(dropped)}")
+    sft = SFTConfig(**{k: v for k, v in sft_kwargs.items() if k in accepted})
 
     trainer = SFTTrainer(model=model, args=sft, train_dataset=ds, peft_config=lora, processing_class=tok)
     trainer.train()
