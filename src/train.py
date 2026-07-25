@@ -13,7 +13,9 @@ from trl import SFTConfig, SFTTrainer
 
 
 def load_cfg(path):
-    with open(path) as f:
+    # Explicit utf-8: Windows defaults to the ANSI codepage (GBK on zh-CN) and
+    # chokes on any non-ASCII byte in the config.
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 

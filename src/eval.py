@@ -13,7 +13,8 @@ from peft import PeftModel
 
 
 def load_cfg(path):
-    with open(path) as f:
+    # Explicit utf-8 — Windows would otherwise use the ANSI codepage (GBK on zh-CN).
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -100,7 +101,8 @@ def main():
 
     report = {"model": cfg["model"], "adapter": a.adapter, "base": base_m, "tuned": tuned_m,
               "delta": {k: round(tuned_m[k] - base_m[k], 4) for k in ("valid_json", "name_acc", "exact_match")}}
-    json.dump(report, open(a.out, "w"), indent=2)
+    with open(a.out, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
 
     print(f"\n{'metric':<12}{'base':>9}{'tuned':>9}{'Δ':>9}")
     for k in ("valid_json", "name_acc", "exact_match"):
