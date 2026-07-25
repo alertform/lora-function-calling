@@ -94,19 +94,30 @@ def from_glaive(row):
     "no applicable tool" is a behaviour worth training, not noise.
     """
     tools = _json_objects(row.get("system", "") or "")
-
     chat = row.get("chat", "") or ""
-    hm = re.search(r"USER:\s*(.*?)(?:\n\n|ASSISTANT:|$)", chat, re.S)
-    q = hm.group(1).strip() if hm else ""
 
-    calls = []
-    fm = re.search(r"<functioncall>\s*(\{.*?\})\s*(?:<\|endoftext\|>|$|\n)", chat, re.S)
-    if fm:
-        obj = _loads(fm.group(1))
-        if isinstance(obj, dict):
-            # glaive nests arguments as a JSON *string* — _norm_calls unwraps it.
-            calls = _norm_calls([obj])
-    return tools, q, calls
+    def users_in(text):
+        return [
+            u.strip()
+            for u in re.findall(r"USER:\s*(.*?)(?=\n\n|ASSISTANT:|FUNCTION RESPONSE:|$)", text, re.S)
+            if u.strip()
+        ]
+
+    fm = re.search(r"<functioncall>\s*(\{.*?\})\s*<\|endoftext\|>", chat, re.S)
+    if not fm:
+        us = users_in(chat)
+        return tools, (us[0] if us else ""), []
+
+    # glaive writes arguments as a SINGLE-QUOTED JSON string — invalid JSON, so
+    # json.loads fails on the raw call. Re-quote it into a proper JSON string first.
+    raw = re.sub(r"'(\{.*?\})'", lambda m: json.dumps(m.group(1)), fm.group(1), flags=re.S)
+    obj = _loads(raw)
+    calls = _norm_calls([obj]) if isinstance(obj, dict) else []
+
+    # Conversations are multi-turn: the assistant may ask a clarifying question
+    # before calling. Pair the call with the LAST user turn preceding it.
+    us = users_in(chat[: fm.start()])
+    return tools, (us[-1] if us else ""), calls
 
 
 def build(tools, query, calls, tokenizer=None):
@@ -123,6 +134,8 @@ def main():
     ap.add_argument("--max_samples", type=int, default=8000)
     ap.add_argument("--eval_samples", type=int, default=300)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--empty_ratio", type=float, default=0.2,
+                    help="max share of examples whose target is [] (no applicable tool)")
     ap.add_argument("--out", default="data")
     args = ap.parse_args()
 
@@ -131,13 +144,21 @@ def main():
     ds = load_dataset(args.dataset, split="train")
     picker = from_xlam if "xlam" in args.dataset.lower() else from_glaive
 
-    rows = []
+    # Keep "no applicable tool" examples, but cap them: glaive is ~dominated by
+    # declines, and an unbalanced set teaches the model to always answer [].
+    want = args.max_samples + args.eval_samples
+    max_empty = int(want * args.empty_ratio)
+    rows, n_empty = [], 0
     for row in ds:
         tools, query, calls = picker(row)
         if not query or not tools:
             continue
+        if not calls:
+            if n_empty >= max_empty:
+                continue
+            n_empty += 1
         rows.append((tools, query, calls))
-        if len(rows) >= args.max_samples + args.eval_samples:
+        if len(rows) >= want:
             break
 
     random.Random(args.seed).shuffle(rows)
