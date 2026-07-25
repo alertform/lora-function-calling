@@ -20,17 +20,25 @@ Agent frameworks live or die on tool-calling reliability. Rather than prompt-eng
 
 ## Results
 
-Held-out set (300 examples), base vs. LoRA-tuned, greedy decoding:
+Held-out set (300 examples from `glaiveai/glaive-function-calling-v2`), base vs. LoRA-tuned,
+greedy decoding, 1 epoch on 8000 training examples:
 
-| metric        | base  | tuned | Δ    |
-|---------------|-------|-------|------|
-| valid_json    | _tbd_ | _tbd_ | _tbd_ |
-| name_acc      | _tbd_ | _tbd_ | _tbd_ |
-| exact_match   | _tbd_ | _tbd_ | _tbd_ |
+| metric        | base  | tuned | Δ      |
+|---------------|-------|-------|--------|
+| valid_json    | 0.973 | 1.000 | +0.027 |
+| name_acc      | 0.963 | 0.993 | +0.030 |
+| exact_match   | 0.897 | 0.943 | +0.047 |
 
 - **valid_json** — reply parses as a JSON array of calls
 - **name_acc** — the set of called tool *names* matches gold exactly
 - **exact_match** — names **and** arguments match gold exactly
+
+Reading the numbers honestly: `Qwen2.5-7B-Instruct` is already a strong tool-caller, so the
+headroom is thin — the win is that malformed output goes to **zero** (0.973 → 1.000, i.e. the
+8 replies the base model wrapped in prose or truncated all become parseable), and roughly
+**45% of the remaining argument errors** are eliminated (10.3% → 5.7% non-exact). 19% of the
+held-out set has an empty gold target (`[]`, no applicable tool), which both models handle
+well; the lift is concentrated in the argument-filling cases.
 
 _(filled by `eval.py`, which writes `eval_report.json`)_
 
