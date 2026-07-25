@@ -52,24 +52,60 @@ def from_xlam(row):
     return _loads(row.get("tools")), row.get("query", ""), _norm_calls(_loads(row.get("answers")))
 
 
+def _json_objects(text):
+    """Yield each top-level {...} block in `text` by brace matching.
+
+    glaive puts its tool specs in the system prompt as bare, concatenated JSON
+    objects (NOT a JSON array), so a regex like r'\\[.*\\]' grabs an inner
+    "required": [...] instead of the specs. Brace matching is the only correct read.
+    """
+    out, depth, start, in_str, esc = [], 0, None, False, False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                obj = _loads(text[start : i + 1])
+                if obj:
+                    out.append(obj)
+                start = None
+    return out
+
+
 def from_glaive(row):
-    # glaive: a "chat"/"system" transcript; pull the tools from system, the human turn,
-    # and the first assistant function call. Best-effort — xLAM is the cleaner default.
-    system = row.get("system", "") or ""
-    tools = []
-    m = re.search(r"\[.*\]", system, re.S)
-    if m:
-        tools = _loads(m.group(0))
+    """glaive-function-calling-v2 -> (tools, query, calls).
+
+    system : "...following functions. Use them if required -\\n{spec}\\n{spec}"
+    chat   : "USER: ...\\n\\nASSISTANT: [<functioncall> {json}] ... <|endoftext|>"
+    Rows where the assistant declines (no functioncall) are kept with calls=[] —
+    "no applicable tool" is a behaviour worth training, not noise.
+    """
+    tools = _json_objects(row.get("system", "") or "")
+
     chat = row.get("chat", "") or ""
-    q = ""
-    hm = re.search(r"USER:\s*(.*?)\s*(ASSISTANT:|$)", chat, re.S)
-    if hm:
-        q = hm.group(1).strip()
+    hm = re.search(r"USER:\s*(.*?)(?:\n\n|ASSISTANT:|$)", chat, re.S)
+    q = hm.group(1).strip() if hm else ""
+
     calls = []
-    fm = re.search(r"<functioncall>\s*(\{.*?\})", chat, re.S)
+    fm = re.search(r"<functioncall>\s*(\{.*?\})\s*(?:<\|endoftext\|>|$|\n)", chat, re.S)
     if fm:
         obj = _loads(fm.group(1))
-        calls = _norm_calls([obj]) if obj else []
+        if isinstance(obj, dict):
+            # glaive nests arguments as a JSON *string* — _norm_calls unwraps it.
+            calls = _norm_calls([obj])
     return tools, q, calls
 
 
@@ -118,7 +154,15 @@ def main():
             prompt, _ = build(tools, q, calls)
             f.write(json.dumps({"messages_prompt": prompt, "gold": calls}, ensure_ascii=False) + "\n")
 
-    print(f"train={len(train_rows)}  eval={len(eval_rows)}  -> {args.out}/")
+    # Class balance matters: if almost every target is [], the model just learns to
+    # always decline. Surface the ratio instead of discovering it after a training run.
+    def with_calls(rs):
+        return sum(1 for _, _, c in rs if c)
+
+    tr_c, ev_c = with_calls(train_rows), with_calls(eval_rows)
+    print(f"train={len(train_rows)} (with tool-calls: {tr_c}, {tr_c/max(1,len(train_rows)):.0%})")
+    print(f"eval ={len(eval_rows)} (with tool-calls: {ev_c}, {ev_c/max(1,len(eval_rows)):.0%})")
+    print(f"-> {args.out}/")
 
 
 if __name__ == "__main__":
