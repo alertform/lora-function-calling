@@ -18,15 +18,18 @@ uv venv --python 3.11 .venv
 $py = ".\.venv\Scripts\python.exe"
 
 # 3. CUDA torch FIRST (cu124 wheels match driver 610.x / CUDA 12.x)
-& $py -m pip install --upgrade pip
-& $py -m pip install torch --index-url https://download.pytorch.org/whl/cu124
+#    NOTE: a uv venv ships no pip — install through `uv pip`, not `python -m pip`.
+uv pip install --python $py torch --index-url https://download.pytorch.org/whl/cu124
 
 # 4. the rest
-& $py -m pip install -r requirements.txt
+uv pip install --python $py -r requirements.txt
 
-# 5. sanity
-& $py -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')"
+# 5. sanity — must actually pass; a native exe's non-zero exit does NOT trip
+#    $ErrorActionPreference, so gate the success banner on $LASTEXITCODE.
+& $py -c "import torch; assert torch.cuda.is_available(), 'CUDA not available'; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.get_device_name(0))"
+if ($LASTEXITCODE -ne 0) { Write-Error "torch/CUDA check FAILED — env is not usable"; exit 1 }
 & $py -c "import bitsandbytes as bnb; print('bitsandbytes', bnb.__version__)"
+if ($LASTEXITCODE -ne 0) { Write-Error "bitsandbytes check FAILED — env is not usable"; exit 1 }
 
 Write-Host "`n✅ env ready. Next:"
 Write-Host "   .\.venv\Scripts\python.exe src\prepare_data.py --dataset Salesforce/xlam-function-calling-60k"
