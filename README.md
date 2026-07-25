@@ -40,10 +40,17 @@ _(filled by `eval.py`, which writes `eval_report.json`)_
 # RTX 4060 / Windows — stands up an isolated Python 3.11 + CUDA env
 powershell -ExecutionPolicy Bypass -File scripts\setup_env.ps1
 
-.\.venv\Scripts\python.exe src\prepare_data.py --dataset Salesforce/xlam-function-calling-60k
+. .\scripts\env.ps1          # HF cache off C:\ + proxy vars (see note below)
+
+.\.venv\Scripts\python.exe src\prepare_data.py --dataset glaiveai/glaive-function-calling-v2
 .\.venv\Scripts\python.exe src\train.py        --config config\qlora.yaml
 .\.venv\Scripts\python.exe src\eval.py         --config config\qlora.yaml --adapter outputs\qwen2.5-7b-fc-qlora
 ```
+
+> **Downloads failing with `SSLEOFError` while the browser works?** PowerShell uses the
+> WinINET system proxy; `requests`/`huggingface_hub` only read `HTTP_PROXY`/`HTTPS_PROXY`.
+> `scripts\env.ps1` copies the system proxy into those vars. No proxy available? Set
+> `$env:HF_ENDPOINT = "https://hf-mirror.com"`.
 
 > **OOM on 8 GB?** Drop `model` in `config/qlora.yaml` to `Qwen/Qwen2.5-3B-Instruct` (or `1.5B`),
 > and/or lower `max_seq_len`. Everything else stays the same.
